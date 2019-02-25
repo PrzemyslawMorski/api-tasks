@@ -10,23 +10,10 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
-	"os"
+	"strconv"
 	"strings"
 	"testing"
 )
-
-const testDbFileName = "__test__.db"
-
-func DeleteTestDb(t *testing.T) {
-	if _, err := os.Stat(testDbFileName); os.IsNotExist(err) {
-		return
-	}
-
-	err := os.Remove(testDbFileName)
-	if err != nil {
-		t.Log(err)
-	}
-}
 
 func TestCreateTasksHandler(t *testing.T) {
 	DeleteTestDb(t)
@@ -42,16 +29,17 @@ func TestCreateTasksHandler(t *testing.T) {
 	router.POST("/", CreateTask)
 	s := server.Server{Router: router}
 
-	t.Run("correct title", func(t *testing.T) {
-		taskTitle := "eat some cheeeeeese"
-
-		reqBody, err := json.Marshal(dtos.CreateTaskDto{Title: taskTitle})
+	t.Run("invalid title", func(t *testing.T) {
+		reqBody := "{\"title\":5}"
 		if err != nil {
 			DeleteTestDb(t)
 			log.Fatal(err)
 		}
 
-		r, _ := http.NewRequest("POST", "/", bytes.NewReader(reqBody))
+		r, err := http.NewRequest("POST", "/", strings.NewReader(reqBody))
+		if err != nil {
+			log.Fatal(err)
+		}
 		w := httptest.NewRecorder()
 
 		s.ServeHTTP(w, r)
@@ -63,30 +51,24 @@ func TestCreateTasksHandler(t *testing.T) {
 				w.Header().Get("Content-Type"), expectedContentTypeHeader)
 		}
 
-		expectedCode := http.StatusOK
+		expectedCode := http.StatusBadRequest
 		if w.Code != expectedCode {
 			DeleteTestDb(t)
 			t.Errorf("handler returned unexpected status code: got %v want %v",
 				w.Code, expectedCode)
 		}
 
-		returnedTask := &store.Task{}
-		err = json.Unmarshal(w.Body.Bytes(), returnedTask)
+		expectedErrorResponse := dtos.ErrorResponseDto{Code: expectedCode, Error: "title has to be a string"}
 
-		createdTask := store.GlobalStoreRef.GetTaskById(returnedTask.Id)
-		if createdTask == nil {
+		expectedBody, err := json.Marshal(expectedErrorResponse)
+		if err != nil {
 			DeleteTestDb(t)
-			t.Error("task was not created in db")
+			t.Error(err)
 		}
 
-		if createdTask.Title != taskTitle {
-			t.Errorf("a task was created with an incorrect title; got %v want %v",
-				createdTask.Title, taskTitle)
-		}
-
-		if returnedTask.Title != taskTitle {
-			t.Errorf("handler returned a task with unexpected title; got %v want %v",
-				createdTask.Title, taskTitle)
+		if !bytes.Equal(w.Body.Bytes(), expectedBody) {
+			t.Errorf("handler returned an unexpected error response; got %v want %+v",
+				w.Body.String(), expectedErrorResponse)
 		}
 	})
 
@@ -99,7 +81,10 @@ func TestCreateTasksHandler(t *testing.T) {
 			log.Fatal(err)
 		}
 
-		r, _ := http.NewRequest("POST", "/", bytes.NewReader(reqBody))
+		r, err := http.NewRequest("POST", "/", bytes.NewReader(reqBody))
+		if err != nil {
+			log.Fatal(err)
+		}
 		w := httptest.NewRecorder()
 
 		s.ServeHTTP(w, r)
@@ -118,7 +103,7 @@ func TestCreateTasksHandler(t *testing.T) {
 				w.Code, expectedCode)
 		}
 
-		expectedErrorResponse := dtos.ErrorResponseDto{Code: expectedCode, Message: "title cannot be empty or all whitespace"}
+		expectedErrorResponse := dtos.ErrorResponseDto{Code: expectedCode, Error: "title cannot be empty or all whitespace"}
 
 		expectedBody, err := json.Marshal(expectedErrorResponse)
 		if err != nil {
@@ -132,14 +117,19 @@ func TestCreateTasksHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid title", func(t *testing.T) {
-		reqBody := "{\"title\":5}"
+	t.Run("correct title", func(t *testing.T) {
+		taskTitle := "eat some cheese"
+
+		reqBody, err := json.Marshal(dtos.CreateTaskDto{Title: taskTitle})
 		if err != nil {
 			DeleteTestDb(t)
 			log.Fatal(err)
 		}
 
-		r, _ := http.NewRequest("POST", "/", strings.NewReader(reqBody))
+		r, err := http.NewRequest("POST", "/", bytes.NewReader(reqBody))
+		if err != nil {
+			log.Fatal(err)
+		}
 		w := httptest.NewRecorder()
 
 		s.ServeHTTP(w, r)
@@ -151,24 +141,36 @@ func TestCreateTasksHandler(t *testing.T) {
 				w.Header().Get("Content-Type"), expectedContentTypeHeader)
 		}
 
-		expectedCode := http.StatusBadRequest
+		expectedCode := http.StatusCreated
 		if w.Code != expectedCode {
 			DeleteTestDb(t)
 			t.Errorf("handler returned unexpected status code: got %v want %v",
 				w.Code, expectedCode)
 		}
 
-		expectedErrorResponse := dtos.ErrorResponseDto{Code: expectedCode, Message: "title has to be a string"}
-
-		expectedBody, err := json.Marshal(expectedErrorResponse)
-		if err != nil {
+		if w.Header().Get("Location") == "" {
 			DeleteTestDb(t)
-			t.Error(err)
+			t.Error("handler did not set the Location header")
 		}
 
-		if !bytes.Equal(w.Body.Bytes(), expectedBody) {
-			t.Errorf("handler returned an unexpected error response; got %v want %+v",
-				w.Body.String(), expectedErrorResponse)
+		createdTaskId, err := strconv.Atoi(w.Header().Get("Location")[1:])
+		if err != nil {
+			DeleteTestDb(t)
+			t.Errorf("handler did not set the proper Location header; got %v", w.Header().Get("Location"))
+		}
+
+		createdTask := store.GlobalStoreRef.GetTaskById(createdTaskId)
+		if createdTask == nil {
+			if err != nil {
+				DeleteTestDb(t)
+				t.Errorf("handler did not set the proper Location header; got %v; task with this id does not exist in store",
+					w.Header().Get("Location"))
+			}
+		}
+
+		if createdTask.Title != taskTitle {
+			t.Errorf("a task was created with an incorrect title; got %v want %v",
+				createdTask.Title, taskTitle)
 		}
 	})
 

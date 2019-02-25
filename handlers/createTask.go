@@ -3,12 +3,13 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/PrzemyslawMorski/json-api/dtos"
 	"github.com/PrzemyslawMorski/json-api/store"
 	"github.com/julienschmidt/httprouter"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 )
 
 func CreateTask(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
@@ -25,11 +26,11 @@ func CreateTask(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 
 		w.WriteHeader(http.StatusBadRequest)
 		response, err := json.Marshal(dtos.ErrorResponseDto{
-			Code:    http.StatusBadRequest,
-			Message: "title has to be a string",
+			Code:  http.StatusBadRequest,
+			Error: "title has to be a string",
 		})
 		if err != nil {
-			_, err = w.Write([]byte("{\"code\":404, \"message\":\"title has to be a string\"}"))
+			_, err = w.Write([]byte("{\"code\":404, \"error\":\"title has to be a string\"}"))
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -44,16 +45,16 @@ func CreateTask(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 		return
 	}
 
-	if t.Title == "" {
+	if strings.Trim(t.Title, " ") == "" {
 		log.Printf("User with ip %v wanted to create a task with empty title", r.RemoteAddr)
 		w.WriteHeader(http.StatusBadRequest)
 
 		response, err := json.Marshal(dtos.ErrorResponseDto{
-			Code:    http.StatusBadRequest,
-			Message: "title cannot be empty or all whitespace",
+			Code:  http.StatusBadRequest,
+			Error: "title cannot be empty or all whitespace",
 		})
 		if err != nil {
-			_, err = w.Write([]byte("{\"code\":404, \"message\":\"title cannot be empty or all whitespace\"}"))
+			_, err = w.Write([]byte("{\"code\":404, \"error\":\"title cannot be empty or all whitespace\"}"))
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -73,19 +74,6 @@ func CreateTask(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 		log.Fatal(err)
 	}
 
-	w.WriteHeader(http.StatusOK)
-
-	response, err := json.Marshal(task)
-	if err != nil {
-		taskJson := fmt.Sprintf("{\"id\":%v,\"title\":\"%v\"}", task.Id, task.Title)
-		_, err = w.Write([]byte(taskJson))
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
-
-	_, err = w.Write([]byte(response))
-	if err != nil {
-		log.Fatal(err)
-	}
+	w.WriteHeader(http.StatusCreated)
+	w.Header().Set("Location", "/"+strconv.Itoa(task.Id))
 }
